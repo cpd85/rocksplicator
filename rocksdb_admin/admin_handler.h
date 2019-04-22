@@ -108,6 +108,8 @@ class AdminHandler : virtual public AdminSvIf {
         CompactDBResponse>>> callback,
       std::unique_ptr<CompactDBRequest> request) override;
 
+  void async_tm_tailKafkaMessages(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr< ::admin::TailKafkaMessagesResponse>>> callback, std::unique_ptr< ::admin::TailKafkaMessagesRequest> request) override;
+
   std::shared_ptr<ApplicationDB> getDB(const std::string& db_name,
                                        AdminException* ex);
 
