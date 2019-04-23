@@ -946,8 +946,13 @@ std::string AdminHandler::DumpDBStatsAsText() const {
   return db_manager_->DumpDBStatsAsText();
 }
 
-void AdminHandler::async_tm_tailKafkaMessages(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr< ::admin::TailKafkaMessagesResponse>>> callback, std::unique_ptr< ::admin::TailKafkaMessagesRequest> request) {
-  auto conf = std::shared_ptr<RdKafka::Conf>(RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL));
+void AdminHandler::async_tm_tailKafkaMessages(
+    std::unique_ptr<apache::thrift::HandlerCallback<
+        std::unique_ptr<::admin::TailKafkaMessagesResponse>>>
+        callback,
+    std::unique_ptr<::admin::TailKafkaMessagesRequest> request) {
+  auto conf = std::shared_ptr<RdKafka::Conf>(
+      RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL));
   auto topic_name = request->topic_name;
   auto timestamp_ms = request->seek_timestamp_ms;
   auto broker_list = request->kafka_broker_list;
@@ -988,6 +993,11 @@ void AdminHandler::async_tm_tailKafkaMessages(std::unique_ptr<apache::thrift::Ha
   LOG(ERROR) << "assigned partitions";
   std::string tsname = "?";
   bool run;
+  rocksdb::Slice key;
+  rocksdb::Slice val;
+  std::shared_ptr<admin::ApplicationDB> db;
+  admin::AdminException e;
+  std::string db_name;
   while (true) {
     auto* message = consumer->consume(1000000);
 
@@ -1017,10 +1027,23 @@ void AdminHandler::async_tm_tailKafkaMessages(std::unique_ptr<apache::thrift::Ha
         LOG(ERROR) << "Key: " << *message->key();
 
         LOG(ERROR) << "Payload: "
-                  << static_cast<std::string*>(message->payload());
+                   << static_cast<std::string*>(message->payload());
         printf("%.*s\n", static_cast<int>(message->len()),
                static_cast<const char*>(message->payload()));
         LOG(ERROR) << "Partition " << message->partition();
+        // TODO: add Connell's part here to convert the key, payload to rocksdb
+        // format using a function in the rocksplicator service and then write
+        // to rocksdb
+        db_name = admin::SegmentToDbName(topic_name.c_str(), partition_num);
+        db = getDB(db_name, &e);
+        if (db == nullptr) {
+          callback.release()->exceptionInThread(std::move(e));
+          return;
+        }
+        key = rocksdb::Slice(message->key()->c_str(), message->key_len());
+        val = rocksdb::Slice(static_cast<const char*>(message->payload()),
+                             message->len());
+        db->rocksdb()->Merge(merge_options_, key, val);
         break;
 
       case RdKafka::ERR__PARTITION_EOF:
@@ -1045,7 +1068,7 @@ void AdminHandler::async_tm_tailKafkaMessages(std::unique_ptr<apache::thrift::Ha
         }
         if (message->payload()) {
           LOG(ERROR) << "Payload: "
-                    << static_cast<std::string*>(message->payload());
+                     << static_cast<std::string*>(message->payload());
         }
         printf("%.*s\n", static_cast<int>(message->len()),
                static_cast<const char*>(message->payload()));
@@ -1061,16 +1084,11 @@ void AdminHandler::async_tm_tailKafkaMessages(std::unique_ptr<apache::thrift::Ha
         /* Errors */
         LOG(ERROR) << "Consume failed: " << message->errstr();
         run = false;
-
-        // TODO: add Connell's part here to convert the key, payload to rocksdb
-        // format using a function in the rocksplicator service and then write
-        // to rocksdb
-      }
+    }
   }
 
   callback->result(TailKafkaMessagesResponse());
   return;
 }
-
 
 }  // namespace admin
