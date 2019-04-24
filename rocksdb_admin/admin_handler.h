@@ -18,8 +18,7 @@
 
 #pragma once
 
-#include <semaphore.h>
-
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -109,8 +108,13 @@ class AdminHandler : virtual public AdminSvIf {
         CompactDBResponse>>> callback,
       std::unique_ptr<CompactDBRequest> request) override;
 
+  void async_tm_tailKafkaMessages(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr< ::admin::TailKafkaMessagesResponse>>> callback, std::unique_ptr< ::admin::TailKafkaMessagesRequest> request) override;
+
   std::shared_ptr<ApplicationDB> getDB(const std::string& db_name,
                                        AdminException* ex);
+
+  // Dump stats for all DBs as a text string
+  std::string DumpDBStatsAsText() const;
 
  private:
   std::unique_ptr<rocksdb::DB> removeDB(const std::string& db_name,
@@ -134,8 +138,10 @@ class AdminHandler : virtual public AdminSvIf {
   std::unique_ptr<rocksdb::DB> meta_db_;
   // segments which allow for overlapping keys when adding SST files
   std::unordered_set<std::string> allow_overlapping_keys_segments_;
-  // semaphore to limit concurrent S3 SST file loadings
-  sem_t s3_sst_loading_sem_;
+  // number of the current concurrenty s3 downloadings
+  std::atomic<int> num_current_s3_sst_downloadings_;
+
+  rocksdb::WriteOptions merge_options_;
 };
 
 }  // namespace admin

@@ -16,9 +16,9 @@
 #pragma once
 
 #include <map>
+#include <shared_mutex>
 #include <string>
 
-#include "folly/RWSpinLock.h"
 #include "rocksdb/db.h"
 #include "rocksdb_admin/application_db.h"
 
@@ -73,11 +73,15 @@ class ApplicationDBManager {
   // Return non-null pointer on success
   std::unique_ptr<rocksdb::DB> removeDB(const std::string& db_name,
                                         std::string* error_message);
+
+  // Dump stats for all DBs as a text string
+  std::string DumpDBStatsAsText() const;
+
   ~ApplicationDBManager();
 
  private:
   std::unordered_map<std::string, std::shared_ptr<ApplicationDB>> dbs_;
-  mutable folly::RWSpinLock dbs_lock_;
+  mutable std::shared_mutex dbs_lock_;
 
   void waitOnApplicationDBRef(const std::shared_ptr<ApplicationDB>& db);
 };
