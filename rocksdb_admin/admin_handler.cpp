@@ -957,8 +957,14 @@ void AdminHandler::async_tm_tailKafkaMessages(
   auto timestamp_ms = request->seek_timestamp_ms;
   auto broker_list = request->kafka_broker_list;
   auto partition_num = request->partition_number;
+  auto db_name = request->db_name;
   int msg_cnt, msg_bytes;
   std::string group_id = "rajath_dev";
+
+  LOG(ERROR) << "tail topic " << request->topic_name
+             << " with timestamp " << timestamp_ms
+             << " and partition no " << partition_num
+             << " and merge to db " << db_name;
 
   std::string err;
   if (conf->set("metadata.broker.list", broker_list, err) !=
@@ -997,7 +1003,6 @@ void AdminHandler::async_tm_tailKafkaMessages(
   rocksdb::Slice val;
   std::shared_ptr<admin::ApplicationDB> db;
   admin::AdminException e;
-  std::string db_name;
   while (true) {
     auto* message = consumer->consume(1000000);
 
@@ -1031,10 +1036,6 @@ void AdminHandler::async_tm_tailKafkaMessages(
         printf("%.*s\n", static_cast<int>(message->len()),
                static_cast<const char*>(message->payload()));
         LOG(ERROR) << "Partition " << message->partition();
-        // TODO: add Connell's part here to convert the key, payload to rocksdb
-        // format using a function in the rocksplicator service and then write
-        // to rocksdb
-        db_name = admin::SegmentToDbName(topic_name.c_str(), partition_num);
         db = getDB(db_name, &e);
         if (db == nullptr) {
           callback.release()->exceptionInThread(std::move(e));

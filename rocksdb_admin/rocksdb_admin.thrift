@@ -152,8 +152,9 @@ struct AddS3SstFilesToDBResponse {
 struct TailKafkaMessagesRequest {
   1: required string topic_name,
   2: required string kafka_broker_list,
-  3: optional i32 partition_number,
-  4: optional i32 seek_timestamp_ms,
+  3: required string db_name,
+  4: optional i64 partition_number,
+  5: optional i64 seek_timestamp_ms,
 }
 
 struct TailKafkaMessagesResponse {
