@@ -998,20 +998,22 @@ void AdminHandler::async_tm_tailKafkaMessages(
   consumer->assign(tmp_topic_partitions);
   LOG(ERROR) << "assigned partitions";
   std::string tsname = "?";
-  bool run;
+  bool run = true;
   rocksdb::Slice key;
   rocksdb::Slice val;
   std::shared_ptr<admin::ApplicationDB> db;
   admin::AdminException e;
-  while (true) {
+  while (run) {
     auto* message = consumer->consume(1000000);
 
     switch (message->err()) {
       case RdKafka::ERR__TIMED_OUT:
         LOG(ERROR) << "timed out";
+        run = false;
         break;
 
       case RdKafka::ERR_NO_ERROR:
+      case RdKafka::ERR__PARTITION_EOF:
         /* Real message */
         msg_cnt++;
         msg_bytes += message->len();
@@ -1032,9 +1034,8 @@ void AdminHandler::async_tm_tailKafkaMessages(
         LOG(ERROR) << "Key: " << *message->key();
 
         LOG(ERROR) << "Payload: "
-                   << static_cast<std::string*>(message->payload());
-        printf("%.*s\n", static_cast<int>(message->len()),
-               static_cast<const char*>(message->payload()));
+                   << "%.*s\n", static_cast<int>(message->len()),
+                        static_cast<const char*>(message->payload());
         LOG(ERROR) << "Partition " << message->partition();
         db = getDB(db_name, &e);
         if (db == nullptr) {
@@ -1045,34 +1046,6 @@ void AdminHandler::async_tm_tailKafkaMessages(
         val = rocksdb::Slice(static_cast<const char*>(message->payload()),
                              message->len());
         db->rocksdb()->Merge(merge_options_, key, val);
-        break;
-
-      case RdKafka::ERR__PARTITION_EOF:
-        LOG(ERROR) << "!! last message!";
-        /* Last message */
-        msg_cnt++;
-        msg_bytes += message->len();
-        LOG(ERROR) << "Read msg at offset " << message->offset();
-        RdKafka::MessageTimestamp ts2;
-        ts2 = message->timestamp();
-        if (ts2.type !=
-            RdKafka::MessageTimestamp::MSG_TIMESTAMP_NOT_AVAILABLE) {
-          if (ts2.type == RdKafka::MessageTimestamp::MSG_TIMESTAMP_CREATE_TIME)
-            tsname = "create time";
-          else if (ts2.type ==
-                   RdKafka::MessageTimestamp::MSG_TIMESTAMP_LOG_APPEND_TIME)
-            tsname = "log append time";
-          LOG(ERROR) << "Timestamp: " << tsname << " " << ts2.timestamp;
-        }
-        if (message->key()) {
-          LOG(ERROR) << "Key: " << *message->key();
-        }
-        if (message->payload()) {
-          LOG(ERROR) << "Payload: "
-                     << static_cast<std::string*>(message->payload());
-        }
-        printf("%.*s\n", static_cast<int>(message->len()),
-               static_cast<const char*>(message->payload()));
         break;
 
       case RdKafka::ERR__UNKNOWN_TOPIC:
