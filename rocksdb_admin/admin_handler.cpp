@@ -1013,7 +1013,6 @@ void AdminHandler::async_tm_tailKafkaMessages(
         break;
 
       case RdKafka::ERR_NO_ERROR:
-      case RdKafka::ERR__PARTITION_EOF:
         /* Real message */
         msg_cnt++;
         msg_bytes += message->len();
@@ -1031,21 +1030,27 @@ void AdminHandler::async_tm_tailKafkaMessages(
         }
         LOG(ERROR) << "Timestamp: " << tsname << " " << ts.timestamp;
 
-        LOG(ERROR) << "Key: " << *message->key();
+        if (message->key() && message->payload()) {
 
-        LOG(ERROR) << "Payload: "
-                   << "%.*s\n", static_cast<int>(message->len()),
-                        static_cast<const char*>(message->payload());
-        LOG(ERROR) << "Partition " << message->partition();
-        db = getDB(db_name, &e);
-        if (db == nullptr) {
-          callback.release()->exceptionInThread(std::move(e));
-          return;
+          LOG(ERROR) << "Key: " << *message->key();
+          std::string str_payload = std::string(
+              static_cast<char*>(message->payload()));
+          LOG(ERROR) << "Payload: " << str_payload;
+          LOG(ERROR) << "Partition " << message->partition();
+          db = getDB(db_name, &e);
+          if (db == nullptr) {
+            callback.release()->exceptionInThread(std::move(e));
+            return;
+          }
+          key = rocksdb::Slice(message->key()->c_str(), message->key_len());
+          val = rocksdb::Slice(static_cast<const char*>(message->payload()),
+                               message->len());
+          db->rocksdb()->Merge(merge_options_, key, val);
         }
-        key = rocksdb::Slice(message->key()->c_str(), message->key_len());
-        val = rocksdb::Slice(static_cast<const char*>(message->payload()),
-                             message->len());
-        db->rocksdb()->Merge(merge_options_, key, val);
+        break;
+
+      case RdKafka::ERR__PARTITION_EOF:
+        LOG(ERROR) << "Reached final message. Waiting for further messages";
         break;
 
       case RdKafka::ERR__UNKNOWN_TOPIC:
