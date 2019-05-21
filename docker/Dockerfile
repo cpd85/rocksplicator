@@ -342,6 +342,7 @@ RUN cd /opt && \
       ldconfig) && \
     rm -rf /opt/yaml-cpp
 
+
 # kafka
 RUN cd /opt && \
     git clone https://github.com/edenhill/librdkafka.git && \
@@ -352,4 +353,3 @@ RUN cd /opt && \
      make install && \
      ldconfig) && \
     rm -rf librdkafka
-

@@ -108,6 +108,11 @@ class AdminHandler : virtual public AdminSvIf {
         CompactDBResponse>>> callback,
       std::unique_ptr<CompactDBRequest> request) override;
 
+  void async_tm_tailKafkaMessages(
+      std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<
+          ::admin::TailKafkaMessagesResponse>>> callback,
+          std::unique_ptr< ::admin::TailKafkaMessagesRequest> request) override;
+
   std::shared_ptr<ApplicationDB> getDB(const std::string& db_name,
                                        AdminException* ex);
 
@@ -138,6 +143,8 @@ class AdminHandler : virtual public AdminSvIf {
   std::unordered_set<std::string> allow_overlapping_keys_segments_;
   // number of the current concurrenty s3 downloadings
   std::atomic<int> num_current_s3_sst_downloadings_;
+
+  rocksdb::WriteOptions merge_options_;
 };
 
 }  // namespace admin

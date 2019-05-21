@@ -16,7 +16,6 @@
 // @author bol (bol@pinterest.com)
 //
 
-
 #include "rocksdb_admin/admin_handler.h"
 
 #include <chrono>
@@ -32,19 +31,20 @@
 #include "folly/FileUtil.h"
 #include "folly/ScopeGuard.h"
 #include "folly/String.h"
+#include "librdkafka/rdkafkacpp.h"
 #include "rocksdb/env.h"
-#include "rocksdb/status.h"
 #include "rocksdb/options.h"
+#include "rocksdb/status.h"
 #include "rocksdb/utilities/backupable_db.h"
 #include "rocksdb_admin/utils.h"
 #include "rocksdb_replicator/rocksdb_replicator.h"
 #include "thrift/lib/cpp2/protocol/Serializer.h"
 
-DEFINE_string(hdfs_name_node, "hdfs://hbasebak-infra-namenode-prod1c01-001:8020",
+DEFINE_string(hdfs_name_node,
+              "hdfs://hbasebak-infra-namenode-prod1c01-001:8020",
               "The hdfs name node used for backup");
 
-DEFINE_string(rocksdb_dir, "/tmp/",
-              "The dir for local rocksdb instances");
+DEFINE_string(rocksdb_dir, "/tmp/", "The dir for local rocksdb instances");
 
 DEFINE_int32(num_hdfs_access_threads, 8,
              "The number of threads for backup or restore to/from HDFS");
@@ -52,7 +52,7 @@ DEFINE_int32(num_hdfs_access_threads, 8,
 DEFINE_int32(port, 9090, "Port of the server");
 
 DEFINE_string(shard_config_path, "",
-             "Local path of file storing shard mapping for Aperture");
+              "Local path of file storing shard mapping for Aperture");
 
 // For rocksdb_allow_overlapping_keys and allow_overlapping_keys_segments,
 // we take the logical OR of the bool and if the set contains the segment
@@ -86,7 +86,8 @@ rocksdb::DB* OpenMetaDB() {
   options.create_if_missing = true;
   rocksdb::DB* db;
   auto s = rocksdb::DB::Open(options, FLAGS_rocksdb_dir + "meta_db", &db);
-  CHECK(s.ok()) << "Failed to open meta DB" << " with error " << s.ToString();
+  CHECK(s.ok()) << "Failed to open meta DB"
+                << " with error " << s.ToString();
 
   return db;
 }
@@ -105,23 +106,20 @@ std::unique_ptr<rocksdb::DB> GetRocksdb(const std::string& dir,
 }
 
 folly::Future<std::unique_ptr<rocksdb::DB>> GetRocksdbFuture(
-    const std::string& dir,
-    const rocksdb::Options&options) {
+    const std::string& dir, const rocksdb::Options& options) {
   folly::Promise<std::unique_ptr<rocksdb::DB>> promise;
   auto future = promise.getFuture();
 
-  std::thread opener([dir, options,
-                      promise = std::move(promise)] () mutable {
-      LOG(INFO) << "Start opening " << dir;
-      promise.setValue(GetRocksdb(dir, options));
-      LOG(INFO) << "Finished opening " << dir;
-    });
+  std::thread opener([ dir, options, promise = std::move(promise) ]() mutable {
+    LOG(INFO) << "Start opening " << dir;
+    promise.setValue(GetRocksdb(dir, options));
+    LOG(INFO) << "Finished opening " << dir;
+  });
 
   opener.detach();
 
   return future;
 }
-
 
 std::unique_ptr<::admin::ApplicationDBManager> CreateDBBasedOnConfig(
     const admin::RocksDBOptionsGeneratorType& rocksdb_options) {
@@ -162,36 +160,37 @@ std::unique_ptr<::admin::ApplicationDBManager> CreateDBBasedOnConfig(
         for (const auto& host : shard) {
           if (host.second == common::detail::Role::MASTER) {
             upstream_addr =
-              std::make_unique<folly::SocketAddress>(host.first->addr);
+                std::make_unique<folly::SocketAddress>(host.first->addr);
             upstream_addr->setPort(FLAGS_rocksdb_replicator_port);
             break;
           }
         }
       }
 
-      ops.push_back(
-        [db_name = std::move(db_name),
-         db_future = folly::makeMoveWrapper(std::move(db_future)),
-         upstream_addr = folly::makeMoveWrapper(std::move(upstream_addr)),
-         my_role, &db_manager] () mutable {
-          std::string err_msg;
-          auto db = (*db_future).get();
-          CHECK(db);
-          if (my_role == common::detail::Role::MASTER) {
-            LOG(ERROR) << "Hosting master " << db_name;
-            CHECK(db_manager->addDB(db_name, std::move(db),
-                                    replicator::DBRole::MASTER,
-                                    &err_msg)) << err_msg;
-            return;
-          }
-
-          CHECK(my_role == common::detail::Role::SLAVE);
-          LOG(ERROR) << "Hosting slave " << db_name;
+      ops.push_back([
+        db_name = std::move(db_name),
+        db_future = folly::makeMoveWrapper(std::move(db_future)),
+        upstream_addr = folly::makeMoveWrapper(std::move(upstream_addr)),
+        my_role, &db_manager
+      ]() mutable {
+        std::string err_msg;
+        auto db = (*db_future).get();
+        CHECK(db);
+        if (my_role == common::detail::Role::MASTER) {
+          LOG(ERROR) << "Hosting master " << db_name;
           CHECK(db_manager->addDB(db_name, std::move(db),
-                                  replicator::DBRole::SLAVE,
-                                  std::move(*upstream_addr),
-                                  &err_msg)) << err_msg;
-        });
+                                  replicator::DBRole::MASTER, &err_msg))
+              << err_msg;
+          return;
+        }
+
+        CHECK(my_role == common::detail::Role::SLAVE);
+        LOG(ERROR) << "Hosting slave " << db_name;
+        CHECK(db_manager->addDB(db_name, std::move(db),
+                                replicator::DBRole::SLAVE,
+                                std::move(*upstream_addr), &err_msg))
+            << err_msg;
+      });
     }
   }
 
@@ -202,7 +201,7 @@ std::unique_ptr<::admin::ApplicationDBManager> CreateDBBasedOnConfig(
   return db_manager;
 }
 
-template<typename T>
+template <typename T>
 bool OKOrSetException(const rocksdb::Status& status,
                       const ::admin::AdminErrorCode code,
                       std::unique_ptr<T>* callback) {
@@ -217,9 +216,8 @@ bool OKOrSetException(const rocksdb::Status& status,
   return false;
 }
 
-template<typename T>
-bool SetAddressOrException(const std::string& ip,
-                           const uint16_t port,
+template <typename T>
+bool SetAddressOrException(const std::string& ip, const uint16_t port,
                            folly::SocketAddress* addr,
                            std::unique_ptr<T>* callback) {
   try {
@@ -238,17 +236,16 @@ bool SetAddressOrException(const std::string& ip,
 
 namespace admin {
 
-AdminHandler::AdminHandler(
-    std::unique_ptr<ApplicationDBManager> db_manager,
-    RocksDBOptionsGeneratorType rocksdb_options)
-  : db_manager_(std::move(db_manager))
-  , rocksdb_options_(std::move(rocksdb_options))
-  , db_admin_lock_()
-  , s3_util_()
-  , s3_util_lock_()
-  , meta_db_(OpenMetaDB())
-  , allow_overlapping_keys_segments_()
-  , num_current_s3_sst_downloadings_(0) {
+AdminHandler::AdminHandler(std::unique_ptr<ApplicationDBManager> db_manager,
+                           RocksDBOptionsGeneratorType rocksdb_options)
+    : db_manager_(std::move(db_manager)),
+      rocksdb_options_(std::move(rocksdb_options)),
+      db_admin_lock_(),
+      s3_util_(),
+      s3_util_lock_(),
+      meta_db_(OpenMetaDB()),
+      allow_overlapping_keys_segments_(),
+      num_current_s3_sst_downloadings_(0) {
   if (db_manager_ == nullptr) {
     db_manager_ = CreateDBBasedOnConfig(rocksdb_options_);
   }
@@ -258,14 +255,12 @@ AdminHandler::AdminHandler(
                     allow_overlapping_keys_segments_.begin()));
 
   CHECK(FLAGS_max_s3_sst_loading_concurrency > 0)
-    << "Invalid FLAGS_max_s3_sst_loading_concurrency: "
-    << FLAGS_max_s3_sst_loading_concurrency;
+      << "Invalid FLAGS_max_s3_sst_loading_concurrency: "
+      << FLAGS_max_s3_sst_loading_concurrency;
 }
 
-
-std::shared_ptr<ApplicationDB> AdminHandler::getDB(
-    const std::string& db_name,
-    AdminException* ex) {
+std::shared_ptr<ApplicationDB> AdminHandler::getDB(const std::string& db_name,
+                                                   AdminException* ex) {
   std::string err_msg;
   auto db = db_manager_->getDB(db_name, &err_msg);
   if (db == nullptr && ex) {
@@ -276,9 +271,8 @@ std::shared_ptr<ApplicationDB> AdminHandler::getDB(
   return db;
 }
 
-std::unique_ptr<rocksdb::DB> AdminHandler::removeDB(
-    const std::string& db_name,
-    AdminException* ex) {
+std::unique_ptr<rocksdb::DB> AdminHandler::removeDB(const std::string& db_name,
+                                                    AdminException* ex) {
   std::string err_msg;
   auto db = db_manager_->removeDB(db_name, &err_msg);
   if (db == nullptr && ex) {
@@ -328,9 +322,10 @@ bool AdminHandler::writeMetaData(const std::string& db_name,
 }
 
 void AdminHandler::async_tm_addDB(
-      std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<
-          AddDBResponse>>> callback,
-      std::unique_ptr<AddDBRequest> request) {
+    std::unique_ptr<
+        apache::thrift::HandlerCallback<std::unique_ptr<AddDBResponse>>>
+        callback,
+    std::unique_ptr<AddDBRequest> request) {
   db_admin_lock_.Lock(request->db_name);
   SCOPE_EXIT { db_admin_lock_.Unlock(request->db_name); };
 
@@ -346,8 +341,7 @@ void AdminHandler::async_tm_addDB(
   // Get the upstream for the db to be added
   auto upstream_addr = std::make_unique<folly::SocketAddress>();
   if (!SetAddressOrException(request->upstream_ip,
-                             FLAGS_rocksdb_replicator_port,
-                             upstream_addr.get(),
+                             FLAGS_rocksdb_replicator_port, upstream_addr.get(),
                              &callback)) {
     return;
   }
@@ -359,9 +353,7 @@ void AdminHandler::async_tm_addDB(
     LOG(INFO) << "Clearing DB: " << request->db_name;
     clearMetaData(request->db_name);
     status = rocksdb::DestroyDB(db_path, rocksdb_options_(segment));
-    if (!OKOrSetException(status,
-                          AdminErrorCode::DB_ADMIN_ERROR,
-                          &callback)) {
+    if (!OKOrSetException(status, AdminErrorCode::DB_ADMIN_ERROR, &callback)) {
       LOG(ERROR) << "Failed to clear DB " << request->db_name << " "
                  << status.ToString();
       return;
@@ -371,19 +363,15 @@ void AdminHandler::async_tm_addDB(
   // Open the actual rocksdb instance
   rocksdb::DB* rocksdb_db;
   status = rocksdb::DB::Open(rocksdb_options_(segment), db_path, &rocksdb_db);
-  if (!OKOrSetException(status,
-                        AdminErrorCode::DB_ERROR,
-                        &callback)) {
+  if (!OKOrSetException(status, AdminErrorCode::DB_ERROR, &callback)) {
     return;
   }
 
-
   // add the db to db_manager
   std::string err_msg;
-  if (!db_manager_->addDB(request->db_name,
-                          std::unique_ptr<rocksdb::DB>(rocksdb_db),
-                          replicator::DBRole::SLAVE, std::move(upstream_addr),
-                          &err_msg)) {
+  if (!db_manager_->addDB(
+          request->db_name, std::unique_ptr<rocksdb::DB>(rocksdb_db),
+          replicator::DBRole::SLAVE, std::move(upstream_addr), &err_msg)) {
     e.errorCode = AdminErrorCode::DB_ADMIN_ERROR;
     e.message = std::move(err_msg);
     callback.release()->exceptionInThread(std::move(e));
@@ -394,12 +382,13 @@ void AdminHandler::async_tm_addDB(
 
 void AdminHandler::async_tm_ping(
     std::unique_ptr<apache::thrift::HandlerCallback<void>> callback) {
-    callback->done();
+  callback->done();
 }
 
 void AdminHandler::async_tm_backupDB(
-    std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<
-      BackupDBResponse>>> callback,
+    std::unique_ptr<
+        apache::thrift::HandlerCallback<std::unique_ptr<BackupDBResponse>>>
+        callback,
     std::unique_ptr<BackupDBRequest> request) {
   db_admin_lock_.Lock(request->db_name);
   SCOPE_EXIT { db_admin_lock_.Unlock(request->db_name); };
@@ -416,9 +405,7 @@ void AdminHandler::async_tm_backupDB(
 
   rocksdb::Env* hdfs_env;
   auto status = rocksdb::NewHdfsEnv(&hdfs_env, full_path);
-  if (!OKOrSetException(status,
-                        AdminErrorCode::DB_ADMIN_ERROR,
-                        &callback)) {
+  if (!OKOrSetException(status, AdminErrorCode::DB_ADMIN_ERROR, &callback)) {
     return;
   }
   std::unique_ptr<rocksdb::Env> hdfs_env_holder(hdfs_env);
@@ -433,19 +420,15 @@ void AdminHandler::async_tm_backupDB(
   options.backup_env = hdfs_env;
 
   rocksdb::BackupEngine* backup_engine;
-  status = rocksdb::BackupEngine::Open(
-    rocksdb::Env::Default(), options, &backup_engine);
-  if (!OKOrSetException(status,
-                        AdminErrorCode::DB_ADMIN_ERROR,
-                        &callback)) {
+  status = rocksdb::BackupEngine::Open(rocksdb::Env::Default(), options,
+                                       &backup_engine);
+  if (!OKOrSetException(status, AdminErrorCode::DB_ADMIN_ERROR, &callback)) {
     return;
   }
   std::unique_ptr<rocksdb::BackupEngine> backup_engine_holder(backup_engine);
 
   status = backup_engine->CreateNewBackup(db->rocksdb());
-  if (!OKOrSetException(status,
-                        AdminErrorCode::DB_ADMIN_ERROR,
-                        &callback)) {
+  if (!OKOrSetException(status, AdminErrorCode::DB_ADMIN_ERROR, &callback)) {
     return;
   }
 
@@ -454,8 +437,9 @@ void AdminHandler::async_tm_backupDB(
 }
 
 void AdminHandler::async_tm_restoreDB(
-    std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<
-      RestoreDBResponse>>> callback,
+    std::unique_ptr<
+        apache::thrift::HandlerCallback<std::unique_ptr<RestoreDBResponse>>>
+        callback,
     std::unique_ptr<RestoreDBRequest> request) {
   db_admin_lock_.Lock(request->db_name);
   SCOPE_EXIT { db_admin_lock_.Unlock(request->db_name); };
@@ -463,8 +447,7 @@ void AdminHandler::async_tm_restoreDB(
   AdminException e;
   auto upstream_addr = std::make_unique<folly::SocketAddress>();
   if (!SetAddressOrException(request->upstream_ip,
-                             FLAGS_rocksdb_replicator_port,
-                             upstream_addr.get(),
+                             FLAGS_rocksdb_replicator_port, upstream_addr.get(),
                              &callback)) {
     return;
   }
@@ -482,9 +465,7 @@ void AdminHandler::async_tm_restoreDB(
 
   rocksdb::Env* hdfs_env;
   auto status = rocksdb::NewHdfsEnv(&hdfs_env, full_path);
-  if (!OKOrSetException(status,
-                        AdminErrorCode::DB_ADMIN_ERROR,
-                        &callback)) {
+  if (!OKOrSetException(status, AdminErrorCode::DB_ADMIN_ERROR, &callback)) {
     return;
   }
   std::unique_ptr<rocksdb::Env> hdfs_env_holder(hdfs_env);
@@ -499,37 +480,30 @@ void AdminHandler::async_tm_restoreDB(
   options.backup_env = hdfs_env;
 
   rocksdb::BackupEngine* backup_engine;
-  status = rocksdb::BackupEngine::Open(
-    rocksdb::Env::Default(), options, &backup_engine);
-  if (!OKOrSetException(status,
-                        AdminErrorCode::DB_ADMIN_ERROR,
-                        &callback)) {
+  status = rocksdb::BackupEngine::Open(rocksdb::Env::Default(), options,
+                                       &backup_engine);
+  if (!OKOrSetException(status, AdminErrorCode::DB_ADMIN_ERROR, &callback)) {
     return;
   }
   std::unique_ptr<rocksdb::BackupEngine> backup_engine_holder(backup_engine);
 
   auto db_path = FLAGS_rocksdb_dir + request->db_name;
   status = backup_engine->RestoreDBFromLatestBackup(db_path, db_path);
-  if (!OKOrSetException(status,
-                        AdminErrorCode::DB_ADMIN_ERROR,
-                        &callback)) {
+  if (!OKOrSetException(status, AdminErrorCode::DB_ADMIN_ERROR, &callback)) {
     return;
   }
 
   rocksdb::DB* rocksdb_db;
   auto segment = admin::DbNameToSegment(request->db_name);
   status = rocksdb::DB::Open(rocksdb_options_(segment), db_path, &rocksdb_db);
-  if (!OKOrSetException(status,
-                        AdminErrorCode::DB_ERROR,
-                        &callback)) {
+  if (!OKOrSetException(status, AdminErrorCode::DB_ERROR, &callback)) {
     return;
   }
 
   std::string err_msg;
-  if (!db_manager_->addDB(request->db_name,
-                          std::unique_ptr<rocksdb::DB>(rocksdb_db),
-                          replicator::DBRole::SLAVE,
-                          std::move(upstream_addr), &err_msg)) {
+  if (!db_manager_->addDB(
+          request->db_name, std::unique_ptr<rocksdb::DB>(rocksdb_db),
+          replicator::DBRole::SLAVE, std::move(upstream_addr), &err_msg)) {
     e.errorCode = AdminErrorCode::DB_ADMIN_ERROR;
     e.message = std::move(err_msg);
     callback.release()->exceptionInThread(std::move(e));
@@ -541,8 +515,9 @@ void AdminHandler::async_tm_restoreDB(
 }
 
 void AdminHandler::async_tm_checkDB(
-    std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<
-      CheckDBResponse>>> callback,
+    std::unique_ptr<
+        apache::thrift::HandlerCallback<std::unique_ptr<CheckDBResponse>>>
+        callback,
     std::unique_ptr<CheckDBRequest> request) {
   AdminException e;
   auto db = getDB(request->db_name, &e);
@@ -575,8 +550,9 @@ void AdminHandler::async_tm_checkDB(
 }
 
 void AdminHandler::async_tm_closeDB(
-    std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<
-      CloseDBResponse>>> callback,
+    std::unique_ptr<
+        apache::thrift::HandlerCallback<std::unique_ptr<CloseDBResponse>>>
+        callback,
     std::unique_ptr<CloseDBRequest> request) {
   db_admin_lock_.Lock(request->db_name);
   SCOPE_EXIT { db_admin_lock_.Unlock(request->db_name); };
@@ -591,8 +567,9 @@ void AdminHandler::async_tm_closeDB(
 }
 
 void AdminHandler::async_tm_changeDBRoleAndUpStream(
-    std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<
-      ChangeDBRoleAndUpstreamResponse>>> callback,
+    std::unique_ptr<apache::thrift::HandlerCallback<
+        std::unique_ptr<ChangeDBRoleAndUpstreamResponse>>>
+        callback,
     std::unique_ptr<ChangeDBRoleAndUpstreamRequest> request) {
   db_admin_lock_.Lock(request->db_name);
   SCOPE_EXIT { db_admin_lock_.Unlock(request->db_name); };
@@ -611,14 +588,12 @@ void AdminHandler::async_tm_changeDBRoleAndUpStream(
   }
 
   std::unique_ptr<folly::SocketAddress> upstream_addr(nullptr);
-  if (new_role == replicator::DBRole::SLAVE &&
-      request->__isset.upstream_ip &&
+  if (new_role == replicator::DBRole::SLAVE && request->__isset.upstream_ip &&
       request->__isset.upstream_port) {
     upstream_addr = std::make_unique<folly::SocketAddress>();
     if (!SetAddressOrException(request->upstream_ip,
                                FLAGS_rocksdb_replicator_port,
-                               upstream_addr.get(),
-                               &callback)) {
+                               upstream_addr.get(), &callback)) {
       return;
     }
   }
@@ -642,8 +617,9 @@ void AdminHandler::async_tm_changeDBRoleAndUpStream(
 }
 
 void AdminHandler::async_tm_getSequenceNumber(
-    std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<
-      GetSequenceNumberResponse>>> callback,
+    std::unique_ptr<apache::thrift::HandlerCallback<
+        std::unique_ptr<GetSequenceNumberResponse>>>
+        callback,
     std::unique_ptr<GetSequenceNumberRequest> request) {
   AdminException e;
   auto db = getDB(request->db_name, &e);
@@ -658,8 +634,9 @@ void AdminHandler::async_tm_getSequenceNumber(
 }
 
 void AdminHandler::async_tm_clearDB(
-    std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<
-      ClearDBResponse>>> callback,
+    std::unique_ptr<
+        apache::thrift::HandlerCallback<std::unique_ptr<ClearDBResponse>>>
+        callback,
     std::unique_ptr<ClearDBRequest> request) {
   db_admin_lock_.Lock(request->db_name);
   SCOPE_EXIT { db_admin_lock_.Unlock(request->db_name); };
@@ -671,11 +648,11 @@ void AdminHandler::async_tm_clearDB(
     auto db = getDB(request->db_name, nullptr);
     if (db) {
       need_to_reopen = true;
-      db_role = db->IsSlave() ? replicator::DBRole::SLAVE :
-        replicator::DBRole::MASTER;
+      db_role = db->IsSlave() ? replicator::DBRole::SLAVE
+                              : replicator::DBRole::MASTER;
       if (db->upstream_addr()) {
         upstream_addr =
-          std::make_unique<folly::SocketAddress>(*(db->upstream_addr()));
+            std::make_unique<folly::SocketAddress>(*(db->upstream_addr()));
       }
     }
   }
@@ -687,9 +664,7 @@ void AdminHandler::async_tm_clearDB(
   LOG(INFO) << "Clearing DB: " << request->db_name;
   clearMetaData(request->db_name);
   auto status = rocksdb::DestroyDB(db_path, options);
-  if (!OKOrSetException(status,
-                        AdminErrorCode::DB_ADMIN_ERROR,
-                        &callback)) {
+  if (!OKOrSetException(status, AdminErrorCode::DB_ADMIN_ERROR, &callback)) {
     LOG(ERROR) << "Failed to clear DB " << request->db_name << " "
                << status.ToString();
     return;
@@ -720,15 +695,16 @@ void AdminHandler::async_tm_clearDB(
   callback->result(ClearDBResponse());
 }
 
-inline bool should_new_s3_client(
-    const common::S3Util& s3_util, AddS3SstFilesToDBRequest* request) {
+inline bool should_new_s3_client(const common::S3Util& s3_util,
+                                 AddS3SstFilesToDBRequest* request) {
   return s3_util.getBucket() != request->s3_bucket ||
          s3_util.getRateLimit() != request->s3_download_limit_mb;
 }
 
 void AdminHandler::async_tm_addS3SstFilesToDB(
-    std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<
-      AddS3SstFilesToDBResponse>>> callback,
+    std::unique_ptr<apache::thrift::HandlerCallback<
+        std::unique_ptr<AddS3SstFilesToDBResponse>>>
+        callback,
     std::unique_ptr<AddS3SstFilesToDBRequest> request) {
   admin::AdminException e;
   e.errorCode = AdminErrorCode::DB_ADMIN_ERROR;
@@ -757,14 +733,12 @@ void AdminHandler::async_tm_addS3SstFilesToDB(
   // from S3 and load it into the DB. This is to limit the allowed concurrent
   // loadings.
   auto n = num_current_s3_sst_downloadings_.fetch_add(1);
-  SCOPE_EXIT {
-    num_current_s3_sst_downloadings_.fetch_sub(1);
-  };
+  SCOPE_EXIT { num_current_s3_sst_downloadings_.fetch_sub(1); };
 
   if (n >= FLAGS_max_s3_sst_loading_concurrency) {
     auto err_str =
-      folly::stringPrintf("Concurrent downloading limit hits %d by %s",
-                          n, request->db_name.c_str());
+        folly::stringPrintf("Concurrent downloading limit hits %d by %s", n,
+                            request->db_name.c_str());
 
     e.message = err_str;
     callback.release()->exceptionInThread(std::move(e));
@@ -811,8 +785,8 @@ void AdminHandler::async_tm_addS3SstFilesToDB(
     local_s3_util = s3_util_;
   }
 
-  auto responses = local_s3_util->getObjects(request->s3_path,
-                                      local_path, "/", FLAGS_s3_direct_io);
+  auto responses = local_s3_util->getObjects(request->s3_path, local_path, "/",
+                                             FLAGS_s3_direct_io);
   if (!responses.Error().empty() || responses.Body().size() == 0) {
     e.message = "Failed to list any object from " + request->s3_path;
 
@@ -860,8 +834,8 @@ void AdminHandler::async_tm_addS3SstFilesToDB(
       allow_overlapping_keys || FLAGS_rocksdb_allow_overlapping_keys;
   if (!allow_overlapping_keys) {
     // clear DB if overlapping keys are not allowed
-    auto db_role = db->IsSlave() ?
-      replicator::DBRole::SLAVE : replicator::DBRole::MASTER;
+    auto db_role =
+        db->IsSlave() ? replicator::DBRole::SLAVE : replicator::DBRole::MASTER;
     std::unique_ptr<folly::SocketAddress> upstream_addr;
     if (db_role == replicator::DBRole::SLAVE &&
         db->upstream_addr() != nullptr) {
@@ -873,9 +847,7 @@ void AdminHandler::async_tm_addS3SstFilesToDB(
     auto db_path = FLAGS_rocksdb_dir + request->db_name;
     LOG(INFO) << "Clearing DB: " << request->db_name;
     auto status = rocksdb::DestroyDB(db_path, options);
-    if (!OKOrSetException(status,
-                          AdminErrorCode::DB_ADMIN_ERROR,
-                          &callback)) {
+    if (!OKOrSetException(status, AdminErrorCode::DB_ADMIN_ERROR, &callback)) {
       LOG(ERROR) << "Failed to clear DB " << request->db_name << " "
                  << status.ToString();
       return;
@@ -893,8 +865,8 @@ void AdminHandler::async_tm_addS3SstFilesToDB(
     }
 
     std::string err_msg;
-    if (!db_manager_->addDB(request->db_name, std::move(rocksdb_db),
-                            db_role, std::move(upstream_addr), &err_msg)) {
+    if (!db_manager_->addDB(request->db_name, std::move(rocksdb_db), db_role,
+                            std::move(upstream_addr), &err_msg)) {
       e.message = std::move(err_msg);
       callback.release()->exceptionInThread(std::move(e));
       return;
@@ -909,9 +881,7 @@ void AdminHandler::async_tm_addS3SstFilesToDB(
   ifo.allow_global_seqno = allow_overlapping_keys;
   ifo.allow_blocking_flush = allow_overlapping_keys;
   auto status = db->rocksdb()->IngestExternalFile(sst_file_paths, ifo);
-  if (!OKOrSetException(status,
-                        AdminErrorCode::DB_ADMIN_ERROR,
-                        &callback)) {
+  if (!OKOrSetException(status, AdminErrorCode::DB_ADMIN_ERROR, &callback)) {
     LOG(ERROR) << "Failed to add files to DB " << request->db_name
                << status.ToString();
     return;
@@ -930,8 +900,9 @@ void AdminHandler::async_tm_addS3SstFilesToDB(
 }
 
 void AdminHandler::async_tm_setDBOptions(
-    std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<
-      SetDBOptionsResponse>>> callback,
+    std::unique_ptr<
+        apache::thrift::HandlerCallback<std::unique_ptr<SetDBOptionsResponse>>>
+        callback,
     std::unique_ptr<SetDBOptionsRequest> request) {
   std::unordered_map<string, string> options;
   for (auto& option_pair : request->options) {
@@ -947,17 +918,16 @@ void AdminHandler::async_tm_setDBOptions(
   }
   // Assume we always use default column family
   auto status = db->rocksdb()->SetOptions(options);
-  if (!OKOrSetException(status,
-                        AdminErrorCode::DB_ADMIN_ERROR,
-                        &callback)) {
+  if (!OKOrSetException(status, AdminErrorCode::DB_ADMIN_ERROR, &callback)) {
     return;
   }
   callback->result(SetDBOptionsResponse());
 }
 
 void AdminHandler::async_tm_compactDB(
-    std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<
-      CompactDBResponse>>> callback,
+    std::unique_ptr<
+        apache::thrift::HandlerCallback<std::unique_ptr<CompactDBResponse>>>
+        callback,
     std::unique_ptr<CompactDBRequest> request) {
   ::admin::AdminException e;
   auto db = getDB(request->db_name, &e);
@@ -966,8 +936,8 @@ void AdminHandler::async_tm_compactDB(
     return;
   }
 
-  auto status = db->CompactRange(
-      rocksdb::CompactRangeOptions(), nullptr, nullptr);
+  auto status =
+      db->CompactRange(rocksdb::CompactRangeOptions(), nullptr, nullptr);
   if (!status.ok()) {
     e.message = status.ToString();
     e.errorCode = AdminErrorCode::DB_ERROR;
@@ -979,6 +949,130 @@ void AdminHandler::async_tm_compactDB(
 
 std::string AdminHandler::DumpDBStatsAsText() const {
   return db_manager_->DumpDBStatsAsText();
+}
+
+void AdminHandler::async_tm_tailKafkaMessages(
+    std::unique_ptr<apache::thrift::HandlerCallback<
+        std::unique_ptr<::admin::TailKafkaMessagesResponse>>>
+        callback,
+    std::unique_ptr<::admin::TailKafkaMessagesRequest> request) {
+  auto conf = std::shared_ptr<RdKafka::Conf>(
+      RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL));
+  auto topic_name = request->topic_name;
+  auto timestamp_ms = request->seek_timestamp_ms;
+  auto broker_list = request->kafka_broker_list;
+  auto partition_num = request->partition_number;
+  auto db_name = request->db_name;
+  int msg_cnt, msg_bytes;
+  std::string group_id = "rajath_dev";
+
+  LOG(ERROR) << "tail topic " << request->topic_name
+             << " with timestamp " << timestamp_ms
+             << " and partition no " << partition_num
+             << " and merge to db " << db_name;
+
+  std::string err;
+  if (conf->set("metadata.broker.list", broker_list, err) !=
+      RdKafka::Conf::CONF_OK) {
+    LOG(ERROR) << "Failed to create kafka config for error: " << err;
+    return;
+  }
+
+  conf->set("api.version.request", "true", err);
+  conf->set("enable.auto.offset.store", "false", err);
+  conf->set("group.id", group_id, err);
+  std::shared_ptr<RdKafka::KafkaConsumer> consumer =
+      std::shared_ptr<RdKafka::KafkaConsumer>(
+          RdKafka::KafkaConsumer::create(conf.get(), err));
+
+  LOG(INFO) << "% Created consumer " << consumer->name();
+
+  std::vector<std::shared_ptr<RdKafka::TopicPartition>> topic_partitions;
+  std::vector<RdKafka::TopicPartition*> tmp_topic_partitions;
+  topic_partitions.reserve(1);
+  tmp_topic_partitions.reserve(1);
+
+  topic_partitions.push_back(
+      std::shared_ptr<RdKafka::TopicPartition>(RdKafka::TopicPartition::create(
+          topic_name, partition_num, timestamp_ms)));
+
+  tmp_topic_partitions.push_back(topic_partitions.back().get());
+
+  // Consume messages only from particular partition
+  consumer->offsetsForTimes(tmp_topic_partitions, 100000);
+  consumer->assign(tmp_topic_partitions);
+  LOG(ERROR) << "assigned partitions";
+  std::string tsname = "?";
+  bool run = true;
+  rocksdb::Slice key;
+  rocksdb::Slice val;
+  std::shared_ptr<admin::ApplicationDB> db;
+  admin::AdminException e;
+  while (run) {
+    auto* message = consumer->consume(1000000);
+
+    switch (message->err()) {
+      case RdKafka::ERR__TIMED_OUT:
+        LOG(ERROR) << "timed out";
+        run = false;
+        break;
+
+      case RdKafka::ERR_NO_ERROR:
+        /* Real message */
+        msg_cnt++;
+        msg_bytes += message->len();
+
+        LOG(ERROR) << "Read msg at offset " << message->offset();
+
+        RdKafka::MessageTimestamp ts;
+        ts = message->timestamp();
+
+        if (ts.type == RdKafka::MessageTimestamp::MSG_TIMESTAMP_CREATE_TIME) {
+          tsname = "create time";
+        } else if (ts.type ==
+                   RdKafka::MessageTimestamp::MSG_TIMESTAMP_LOG_APPEND_TIME) {
+          tsname = "log append time";
+        }
+        LOG(ERROR) << "Timestamp: " << tsname << " " << ts.timestamp;
+
+        if (message->key() && message->payload()) {
+
+          LOG(ERROR) << "Key: " << *message->key();
+          std::string str_payload = std::string(
+              static_cast<char*>(message->payload()));
+          LOG(ERROR) << "Payload: " << str_payload;
+          LOG(ERROR) << "Partition " << message->partition();
+          db = getDB(db_name, &e);
+          if (db == nullptr) {
+            callback.release()->exceptionInThread(std::move(e));
+            return;
+          }
+          key = rocksdb::Slice(message->key()->c_str(), message->key_len());
+          val = rocksdb::Slice(static_cast<const char*>(message->payload()),
+                               message->len());
+          db->rocksdb()->Merge(merge_options_, key, val);
+        }
+        break;
+
+      case RdKafka::ERR__PARTITION_EOF:
+        LOG(ERROR) << "Reached final message. Waiting for further messages";
+        break;
+
+      case RdKafka::ERR__UNKNOWN_TOPIC:
+      case RdKafka::ERR__UNKNOWN_PARTITION:
+        LOG(ERROR) << "Consume failed: " << message->errstr();
+        run = false;
+        break;
+
+      default:
+        /* Errors */
+        LOG(ERROR) << "Consume failed: " << message->errstr();
+        run = false;
+    }
+  }
+
+  callback->result(TailKafkaMessagesResponse());
+  return;
 }
 
 }  // namespace admin

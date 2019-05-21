@@ -149,6 +149,18 @@ struct AddS3SstFilesToDBResponse {
   # for future use
 }
 
+struct TailKafkaMessagesRequest {
+  1: required string topic_name,
+  2: required string kafka_broker_list,
+  3: required string db_name,
+  4: optional i64 partition_number,
+  5: optional i64 seek_timestamp_ms,
+}
+
+struct TailKafkaMessagesResponse {
+  # for future use
+}
+
 struct SetDBOptionsRequest {
   # For keys supported in this map, please refer to:
   # https://github.com/facebook/rocksdb/blob/master/util/cf_options.h#L161
@@ -233,6 +245,12 @@ ClearDBResponse clearDB(1:ClearDBRequest request)
  * Add SST files from s3 to a DB.
  */
 AddS3SstFilesToDBResponse addS3SstFilesToDB(1:AddS3SstFilesToDBRequest request)
+  throws (1:AdminException e)
+
+/*
+ * Ingest Kafka Messages according to the arguments of TailKafkaMessagesRequest
+ */
+TailKafkaMessagesResponse tailKafkaMessages(1:TailKafkaMessagesRequest request)
   throws (1:AdminException e)
 
 /*
