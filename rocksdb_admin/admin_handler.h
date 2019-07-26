@@ -124,7 +124,7 @@ class AdminHandler : virtual public AdminSvIf {
                                        AdminException* ex);
 
   // Dump stats for all DBs as a text string
-  std::string DumpDBStatsAsText() const;
+  std::string DumpDBStatsAsText();
 
   // Get all the db names held by the AdminHandler
   std::vector<std::string> getAllDBNames();
@@ -148,8 +148,6 @@ class AdminHandler : virtual public AdminSvIf {
   std::shared_ptr<common::S3Util> s3_util_;
   // Lock for protecting the s3 util
   mutable std::mutex s3_util_lock_;
-  // db that contains meta data for all local rocksdb instances
-  std::unique_ptr<rocksdb::DB> meta_db_;
   // segments which allow for overlapping keys when adding SST files
   std::unordered_set<std::string> allow_overlapping_keys_segments_;
   // number of the current concurrenty s3 downloadings

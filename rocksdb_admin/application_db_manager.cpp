@@ -20,15 +20,70 @@
 #include <thread>
 #include <vector>
 
+#include "folly/String.h"
 #include "glog/logging.h"
+#include "thrift/lib/cpp2/protocol/Serializer.h"
+
+
+DEFINE_string(rocksdb_dir, "/tmp/",
+    "The dir for local rocksdb instances");
 
 namespace admin {
 
 const int kRemoveDBRefWaitMilliSec = 200;
 
+rocksdb::DB* OpenMetaDB() {
+  rocksdb::Options options;
+  options.create_if_missing = true;
+  rocksdb::DB* db;
+  auto s = rocksdb::DB::Open(options, FLAGS_rocksdb_dir + "meta_db", &db);
+  CHECK(s.ok()) << "Failed to open meta DB"
+                << " with error " << s.ToString();
+
+  return db;
+}
+
 ApplicationDBManager::ApplicationDBManager()
-    : dbs_()
-    , dbs_lock_() {}
+    : dbs_(), meta_db_(OpenMetaDB()), dbs_lock_() {}
+
+bool ApplicationDBManager::clearMetaData(const std::string& db_name) {
+  rocksdb::WriteOptions options;
+  options.sync = true;
+  auto s = meta_db_->Delete(options, db_name);
+  return s.ok();
+}
+
+bool ApplicationDBManager::writeMetaData(
+    const std::string& db_name, const std::string& s3_bucket,
+    const std::string& s3_path, const int64_t last_kafka_msg_timestamp_ms) {
+  DBMetaData meta;
+  meta.db_name = db_name;
+  meta.set_s3_bucket(s3_bucket);
+  meta.set_s3_path(s3_path);
+  meta.set_last_kafka_msg_timestamp_ms(last_kafka_msg_timestamp_ms);
+
+  std::string buffer;
+  apache::thrift::CompactSerializer::serialize(meta, &buffer);
+
+  rocksdb::WriteOptions options;
+  options.sync = true;
+  auto s = meta_db_->Put(options, db_name, buffer);
+  return s.ok();
+}
+
+DBMetaData ApplicationDBManager::getMetaData(const std::string& db_name) {
+  DBMetaData meta;
+  meta.db_name = db_name;
+
+  std::string buffer;
+  rocksdb::ReadOptions options;
+  auto s = meta_db_->Get(options, db_name, &buffer);
+  if (s.ok()) {
+    apache::thrift::CompactSerializer::deserialize(buffer, meta);
+  }
+
+  return meta;
+}
 
 bool ApplicationDBManager::addDB(const std::string& db_name,
                                  std::unique_ptr<rocksdb::DB> db,
@@ -95,14 +150,11 @@ std::unique_ptr<rocksdb::DB> ApplicationDBManager::removeDB(
   return std::unique_ptr<rocksdb::DB>(ret->db_.get());
 }
 
-std::string ApplicationDBManager::DumpDBStatsAsText() const {
-  std::vector<std::shared_ptr<ApplicationDB>> dbs;
+std::string ApplicationDBManager::DumpDBStatsAsText() {
+    std::unordered_map<std::string, std::shared_ptr<ApplicationDB>> dbs_copy;
   {
     std::shared_lock<std::shared_mutex> lock(dbs_lock_);
-    dbs.reserve(dbs_.size());
-    for (const auto& db : dbs_) {
-      dbs.push_back(db.second);
-    }
+    dbs_copy = dbs_;
   }
 
   std::string stats;
@@ -110,7 +162,9 @@ std::string ApplicationDBManager::DumpDBStatsAsText() const {
   // total_sst_file_size db=abc00001: 12345
   // total_sst_file_size db=abc00002: 54321
   uint64_t sz;
-  for (const auto& db : dbs) {
+  for (const auto& itor : dbs_copy) {
+    auto db_name = itor.first;
+    auto db = itor.second;
     if (!db->rocksdb()->GetIntProperty(
           rocksdb::DB::Properties::kTotalSstFilesSize, &sz)) {
       LOG(ERROR) << "Failed to get kTotalSstFilesSize for " << db->db_name();
@@ -119,6 +173,13 @@ std::string ApplicationDBManager::DumpDBStatsAsText() const {
 
     stats += folly::stringPrintf("  total_sst_file_size db=%s: %" PRIu64 "\n",
                                  db->db_name().c_str(), sz);
+
+    DBMetaData meta = this->getMetaData(db_name);
+    if (meta.last_kafka_msg_timestamp_ms > 0) {
+        stats += folly::stringPrintf(" last_kafka_msg_timestamp_ms db=%s " PRIu64 "\n",
+                                     db->db_name().c_str(), meta.last_kafka_msg_timestamp_ms);
+
+    }
   }
 
   return stats;

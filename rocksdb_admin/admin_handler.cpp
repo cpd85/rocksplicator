@@ -52,8 +52,7 @@
 DEFINE_string(hdfs_name_node, "hdfs://hbasebak-infra-namenode-prod1c01-001:8020",
               "The hdfs name node used for backup");
 
-DEFINE_string(rocksdb_dir, "/tmp/",
-              "The dir for local rocksdb instances");
+DECLARE_string(rocksdb_dir);
 
 DEFINE_int32(num_hdfs_access_threads, 8,
              "The number of threads for backup or restore to/from HDFS");
@@ -125,16 +124,6 @@ std::string ToUTC(const int64_t time_secs) {
 std::string getConsumerGroupId(
     const std::string& db_name) {
   return common::getLocalIPAddress() + '_' + db_name;
-}
-
-rocksdb::DB* OpenMetaDB() {
-  rocksdb::Options options;
-  options.create_if_missing = true;
-  rocksdb::DB* db;
-  auto s = rocksdb::DB::Open(options, FLAGS_rocksdb_dir + "meta_db", &db);
-  CHECK(s.ok()) << "Failed to open meta DB" << " with error " << s.ToString();
-
-  return db;
 }
 
 std::unique_ptr<rocksdb::DB> GetRocksdb(const std::string& dir,
@@ -292,7 +281,6 @@ AdminHandler::AdminHandler(
   , db_admin_lock_()
   , s3_util_()
   , s3_util_lock_()
-  , meta_db_(OpenMetaDB())
   , allow_overlapping_keys_segments_()
   , num_current_s3_sst_downloadings_(0) {
   if (db_manager_ == nullptr) {
@@ -336,24 +324,12 @@ std::unique_ptr<rocksdb::DB> AdminHandler::removeDB(
 }
 
 DBMetaData AdminHandler::getMetaData(const std::string& db_name) {
-  DBMetaData meta;
-  meta.db_name = db_name;
-
-  std::string buffer;
-  rocksdb::ReadOptions options;
-  auto s = meta_db_->Get(options, db_name, &buffer);
-  if (s.ok()) {
-    apache::thrift::CompactSerializer::deserialize(buffer, meta);
-  }
-
-  return meta;
+    return db_manager_->getMetaData(db_name);
 }
 
+
 bool AdminHandler::clearMetaData(const std::string& db_name) {
-  rocksdb::WriteOptions options;
-  options.sync = true;
-  auto s = meta_db_->Delete(options, db_name);
-  return s.ok();
+  return db_manager_->clearMetaData(db_name);
 }
 
 bool AdminHandler::writeMetaData(
@@ -361,19 +337,7 @@ bool AdminHandler::writeMetaData(
     const std::string& s3_bucket,
     const std::string& s3_path,
     const int64_t last_kafka_msg_timestamp_ms) {
-  DBMetaData meta;
-  meta.db_name = db_name;
-  meta.set_s3_bucket(s3_bucket);
-  meta.set_s3_path(s3_path);
-  meta.set_last_kafka_msg_timestamp_ms(last_kafka_msg_timestamp_ms);
-
-  std::string buffer;
-  apache::thrift::CompactSerializer::serialize(meta, &buffer);
-
-  rocksdb::WriteOptions options;
-  options.sync = true;
-  auto s = meta_db_->Put(options, db_name, buffer);
-  return s.ok();
+  return db_manager_->writeMetaData(db_name, s3_bucket, s3_path, last_kafka_msg_timestamp_ms);
 }
 
 void AdminHandler::async_tm_addDB(
@@ -1216,7 +1180,7 @@ void AdminHandler::async_tm_compactDB(
   callback.release()->result(CompactDBResponse());
 }
 
-std::string AdminHandler::DumpDBStatsAsText() const {
+std::string AdminHandler::DumpDBStatsAsText() {
   return db_manager_->DumpDBStatsAsText();
 }
 

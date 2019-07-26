@@ -21,6 +21,12 @@
 
 #include "rocksdb/db.h"
 #include "rocksdb_admin/application_db.h"
+#ifdef PINTEREST_INTERNAL
+// NEVER SET THIS UNLESS PINTEREST INTERNAL USAGE.
+#include "schemas/gen-cpp2/Admin.h"
+#else
+#include "rocksdb_admin/gen-cpp2/Admin.h"
+#endif
 
 namespace admin {
 
@@ -75,18 +81,28 @@ class ApplicationDBManager {
                                         std::string* error_message);
 
   // Dump stats for all DBs as a text string
-  std::string DumpDBStatsAsText() const;
+  std::string DumpDBStatsAsText();
 
   // Get the names of all DBs currently held by the ApplicationDBManager
   // This can be used if some service wants to perform some action such
   // as compaction across all dbs currently maintained.
   std::vector<std::string> getAllDBNames();
 
+  DBMetaData getMetaData(const std::string& db_name);
+  bool clearMetaData(const std::string& db_name);
+  bool writeMetaData(const std::string& db_name,
+                     const std::string& s3_bucket,
+                     const std::string& s3_path,
+                     const int64_t last_kafka_msg_timestamp_ms = -1);
+
   ~ApplicationDBManager();
 
  private:
   std::unordered_map<std::string, std::shared_ptr<ApplicationDB>> dbs_;
   mutable std::shared_mutex dbs_lock_;
+
+  // db that contains meta data for all local rocksdb instances
+  std::unique_ptr<rocksdb::DB> meta_db_;
 
   void waitOnApplicationDBRef(const std::shared_ptr<ApplicationDB>& db);
 };
