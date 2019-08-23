@@ -18,8 +18,6 @@
 
 #include "rocksdb_admin/helix_client.h"
 
-#include "jni.h"
-
 #include <chrono>
 #include <thread>
 #include <glog/logging.h>
@@ -118,27 +116,33 @@ void invokeClass(JNIEnv* env,
 
 namespace admin {
 
-void JoinCluster(const std::string& zk_connect_str,
-                 const std::string& cluster,
+void HelixClient::JoinCluster(const std::string& zk_connect_str,
                  const std::string& state_model_type,
                  const std::string& domain,
-                 const std::string& class_path,
+                 const std::string& class_path;
                  const std::string& config_post_url,
                  const bool disable_spectator) {
-  std::thread t([zk_connect_str, cluster, state_model_type, domain,
+  std::thread t([env_, cluster_, zk_connect_str, state_model_type, domain,
                  class_path, config_post_url, disable_spectator] () {
       // FIXME use a more reliable way to ensure the thread calling JoinCluster
       // has time to start the thrift server.
       std::this_thread::sleep_for(std::chrono::seconds(10));
 
-      auto env = createVM(class_path);
-      invokeClass(env, zk_connect_str, cluster, state_model_type, domain,
+      // At this point, this thread will have created the VM and have ownership
+      env_ = createVM(class_path);
+      invokeClass(env_, zk_connect_str, cluster_, state_model_type, domain,
                   config_post_url, disable_spectator);
     });
 
   t.detach();
 
   LOG(INFO) << "Launching JVM and starting Helix participant";
+}
+
+// Destroy the JVM, which will call the shutdown handler registers
+void HelixClient::LeaveCluster() {
+    JavaVM* jvm;
+    env_->GetJavaVM(&jvm);
 }
 
 }  // namespace admin

@@ -60,7 +60,7 @@ public class Participant {
   private static final String configPostUrl = "configPostUrl";
   private static final String disableSpectator = "disableSpectator";
 
-  private HelixManager helixManager;
+  private static HelixManager helixManager;
   private StateModelFactory<StateModel> stateModelFactory;
 
   private static Options constructCommandLineOptions() {
@@ -166,6 +166,13 @@ public class Participant {
     Thread.currentThread().join();
   }
 
+  public static void disconnectHelixManager() {
+    if (helixManager != null) {
+      LOG.error("Disconnecting the helixManager");
+      helixManager.disconnect();
+    }
+  }
+
   public Participant(String zkConnectString, String clusterName, String instanceName,
                      String stateModelType, int port, String postUrl, boolean runSpectator) throws Exception {
     helixManager = HelixManagerFactory.getZKHelixManager(clusterName, instanceName,
@@ -190,7 +197,6 @@ public class Participant {
     helixManager.connect();
     helixManager.getMessagingService().registerMessageHandlerFactory(
         Message.MessageType.STATE_TRANSITION.name(), stateMach);
-    Runtime.getRuntime().addShutdownHook(new HelixManagerShutdownHook(helixManager));
 
     if (runSpectator) {
       // Add callback to create rocksplicator shard config

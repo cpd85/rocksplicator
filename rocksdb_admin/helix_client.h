@@ -20,29 +20,45 @@
 
 #include <string>
 
+#include "jni.h"
+
 namespace admin {
 
-/*
- * Join a Helix managed cluster.
- *
- * @param zk_connect_str The zk cluster. e.g., "host1:port,host2:port,host3:port"
- * @param cluster The cluster name to join.
- * @param state_model_type The Helix state model to use. e.g., "OnlineOffline"
- * @param domain This is for topology aware cluster management.
- *               e.g., "az=us-east-1a,pg=placement_group1"
- * @param class_path The class path for cluster_management jar.
- * @param config_post_url The url to post shard config
- * @param disable_spectator whether we should disable spectator on this participant
- *
- * @note the function will intentionally crash the calling process if it couldn't
- *  join the cluster successfully.
- */
-void JoinCluster(const std::string& zk_connect_str,
-                 const std::string& cluster,
-                 const std::string& state_model_type,
-                 const std::string& domain,
-                 const std::string& class_path,
-                 const std::string& config_post_url,
-                 const bool disable_spectator = false);
+class HelixClient {
+ public:
+  /*
+   * Spins up a JVM for the HelixClient so that it can later call joinCluster()
+   * @param cluster The cluster name to join
+   */
+  HelixClient(const std::string& cluster);
+
+    /*
+   * Join a Helix managed cluster.
+   *
+   * @param zk_connect_str The zk cluster. e.g., "host1:port,host2:port,host3:port"
+   * @param state_model_type The Helix state model to use. e.g., "OnlineOffline"
+   * @param domain This is for topology aware cluster management.
+   *               e.g., "az=us-east-1a,pg=placement_group1"
+   * @param class_path The class path for cluster_management jar.
+   * @param config_post_url The url to post shard config
+   * @param disable_spectator whether we should disable spectator on this participant
+   *
+   * @note the function will intentionally crash the calling process if it couldn't
+   *  join the cluster successfully.
+   */
+    void JoinCluster(const std::string& zk_connect_str,
+                     const std::string& state_model_type,
+                     const std::string& domain,
+                     const std::string& class_path,
+                     const std::string& config_post_url,
+                     const bool disable_spectator = false);
+
+    void LeaveCluster();
+
+ private:
+  std::string cluster_;
+  JNIEnv* env_;
+};
+
 
 }  // namespace admin
