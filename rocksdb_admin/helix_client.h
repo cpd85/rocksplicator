@@ -26,11 +26,7 @@ namespace admin {
 
 class HelixClient {
  public:
-  /*
-   * Spins up a JVM for the HelixClient so that it can later call joinCluster()
-   * @param cluster The cluster name to join
-   */
-  HelixClient(const std::string& cluster);
+  HelixClient() {};
 
     /*
    * Join a Helix managed cluster.
@@ -49,6 +45,7 @@ class HelixClient {
     void JoinCluster(const std::string& zk_connect_str,
                      const std::string& state_model_type,
                      const std::string& domain,
+                     const std::string& cluster,
                      const std::string& class_path,
                      const std::string& config_post_url,
                      const bool disable_spectator = false);
@@ -56,8 +53,7 @@ class HelixClient {
     void LeaveCluster();
 
  private:
-  std::string cluster_;
-  JNIEnv* env_;
+  JavaVM* jvm_;
 };
 
 

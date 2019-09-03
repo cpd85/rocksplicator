@@ -166,10 +166,10 @@ public class Participant {
     Thread.currentThread().join();
   }
 
-  public static void disconnectHelixManager() {
-    if (helixManager != null) {
-      LOG.error("Disconnecting the helixManager");
-      helixManager.disconnect();
+  public class DebugShutdownHook extends Thread {
+    @Override
+    public void run() {
+      LOG.error("Shutdown hook Executed!!!");
     }
   }
 
@@ -197,6 +197,8 @@ public class Participant {
     helixManager.connect();
     helixManager.getMessagingService().registerMessageHandlerFactory(
         Message.MessageType.STATE_TRANSITION.name(), stateMach);
+    Runtime.getRuntime().addShutdownHook(new HelixManagerShutdownHook(helixManager));
+    Runtime.getRuntime().addShutdownHook(new DebugShutdownHook());
 
     if (runSpectator) {
       // Add callback to create rocksplicator shard config
